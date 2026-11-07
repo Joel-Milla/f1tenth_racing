@@ -1,0 +1,4 @@
+grok_nav**
+__pycache__/
+*.pyc
+*.bak

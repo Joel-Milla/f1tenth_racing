@@ -1,0 +1,20 @@
+# Written by tools/make_test_maps.py. Box centre in Frenet (s, d) of the
+# planner raceline, side length, and map-frame corners.
+levine_box_left:
+  corners:
+  - [-1.5556, 0.3456]
+  - [-1.5695, 0.0459]
+  - [-1.2698, 0.032]
+  - [-1.2559, 0.3317]
+  d: 0.25
+  s: 61.655
+  size: 0.3
+levine_box_right:
+  corners:
+  - [-1.5788, -0.1539]
+  - [-1.5927, -0.4535]
+  - [-1.293, -0.4674]
+  - [-1.2791, -0.1677]
+  d: -0.25
+  s: 61.655
+  size: 0.3

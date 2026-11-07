@@ -1,0 +1,64 @@
+diff --git a/ackermann_mux b/ackermann_mux
+--- a/ackermann_mux
++++ b/ackermann_mux
+@@ -1 +1 @@
+-Subproject commit b3c0b083ac03aa8c648537d7e4d22608fcd3440c
++Subproject commit b3c0b083ac03aa8c648537d7e4d22608fcd3440c-dirty
+diff --git a/f1tenth_stack/config/joy_teleop.yaml b/f1tenth_stack/config/joy_teleop.yaml
+index 795cbd6..3d4f3e2 100755
+--- a/f1tenth_stack/config/joy_teleop.yaml
++++ b/f1tenth_stack/config/joy_teleop.yaml
+@@ -2,7 +2,7 @@ joy:
+   ros__parameters:
+     # device_name: /dev/input/joypad-f710
+     device_id: 0
+-    deadzone: 0.01
++    deadzone: 0.2
+     autorepeat_rate: 20.0
+     coalesce_interval: 0.01
+ 
+diff --git a/f1tenth_stack/config/mux.yaml b/f1tenth_stack/config/mux.yaml
+index 1a02c9f..5ac61df 100755
+--- a/f1tenth_stack/config/mux.yaml
++++ b/f1tenth_stack/config/mux.yaml
+@@ -4,8 +4,8 @@ ackermann_mux:
+       navigation:
+         topic   : drive
+         timeout : 0.2
+-        priority: 10
++        priority: 100
+       joystick:
+         topic   : teleop
+         timeout : 0.2
+-        priority: 100
+\ No newline at end of file
++        priority: 10
+\ No newline at end of file
+diff --git a/f1tenth_stack/config/vesc.yaml b/f1tenth_stack/config/vesc.yaml
+index 5531a64..930ca3f 100755
+--- a/f1tenth_stack/config/vesc.yaml
++++ b/f1tenth_stack/config/vesc.yaml
+@@ -7,7 +7,7 @@
+ 
+     # servo value (0 to 1) =  steering_angle_to_servo_gain * steering angle (radians) + steering_angle_to_servo_offset
+     steering_angle_to_servo_gain: -1.2135
+-    steering_angle_to_servo_offset: 0.5304
++    steering_angle_to_servo_offset: 0.466
+ 
+     port: /dev/sensors/vesc
+     duty_cycle_min: 0.0
+@@ -20,7 +20,7 @@
+     speed_max: 23250.0
+     position_min: 0.0
+     position_max: 0.0
+-    servo_min: 0.15
++    servo_min: 0.10
+     servo_max: 0.85
+ 
+ # No longer needed, all parameters are shared
+diff --git a/vesc b/vesc
+--- a/vesc
++++ b/vesc
+@@ -1 +1 @@
+-Subproject commit 153998df8545fe1781b975df88e411b4e71d4bfe
++Subproject commit 153998df8545fe1781b975df88e411b4e71d4bfe-dirty

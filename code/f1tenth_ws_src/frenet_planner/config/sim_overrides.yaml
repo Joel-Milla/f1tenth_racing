@@ -1,0 +1,23 @@
+# Loaded on top of frenet_planner.yaml when use_sim:=true
+# (local_planner_launch.py) and by tools/sim_eval.py.
+frenet_planner:
+  ros__parameters:
+    node:
+      # The sim spawns the car at a known pose: drive straight away.
+      start_armed: true
+    detection:
+      # The sim opponent is a full 0.58 x 0.31 car body: seen rear and side
+      # at once while we pull alongside it is up to 0.66 m across, and at
+      # 0.6 m it is dropped exactly when it matters. The real opponent is a
+      # 12 cm box, so the car keeps 0.6.
+      max_cluster_size: 0.7
+    speed:
+      # Sim only: in tools/sim_eval.py all of these are collision-free on
+      # Levine (clean lap 12.7 s vs 28.3 s at the car settings: box laps,
+      # head-to-head included). f110_gym has perfect localization and grip
+      # (mu ~1.05, ~10 m/s^2); the car keeps frenet_planner.yaml's values
+      # until raised there step by step.
+      global_scale: 1.5
+      a_lat_max: 8.0
+    planner:
+      v_avoid: 2.5

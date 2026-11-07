@@ -1,0 +1,14 @@
+# Loaded on top of frenet_planner.yaml when use_sim:=false
+# (local_planner_launch.py). Car-only values live here so that copying a new
+# frenet_planner folder over from the sim machine does not clobber them.
+frenet_planner:
+  ros__parameters:
+    node:
+      pose_topic: /pf/pose/odom
+    raceline:
+      # Same raceline as RRT and pure pursuit
+      file: /home/f1tenth/f1tenth_ws/src/pure_pursuit/waypoints/waypoints.csv
+    map:
+      # Clean copy of the track map (no obstacles). Must share the particle
+      # filter's map frame (particle_filter/config/localize.yaml).
+      yaml_file: /home/f1tenth/f1tenth_ws/src/frenet_planner/maps/map_1_clean.yaml

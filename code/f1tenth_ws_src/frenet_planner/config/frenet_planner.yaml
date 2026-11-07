@@ -1,0 +1,307 @@
+# Frenet-frame sampling local planner (Werling-style).
+# Units are metres, seconds and radians unless a comment says otherwise.
+# Sign convention: s runs along the raceline in the driving direction (CCW),
+# d is the lateral offset, positive to the LEFT of the raceline.
+frenet_planner:
+  ros__parameters:
+
+    node:
+      # nav_msgs/Odometry with the car's pose in the map frame.
+      # Sim: /ego_racecar/odom (ground truth). Car: /pf/pose/odom (particle filter).
+      pose_topic: /ego_racecar/odom
+      # sensor_msgs/LaserScan, same topic in the sim and on the car.
+      scan_topic: /scan
+      # ackermann_msgs/AckermannDriveStamped commands.
+      drive_topic: /drive
+      # false: start holding the car still (speed 0) while still planning
+      # and showing everything; RViz "2D Pose Estimate" or "2D Goal Pose"
+      # arms it, the /frenet_planner/arm service arms or disarms it.
+      start_armed: false
+      frame_id: map
+      # Live markers (car's Frenet state) are published at most this often [Hz].
+      # The sim publishes odometry at ~250 Hz, far more than RViz needs.
+      viz_rate: 10.0
+      # Raceline / bounds markers are re-sent this often so a late RViz sees them [s].
+      static_viz_period: 1.0
+
+    raceline:
+      # x,y CSV with a header row, closed loop. A repeated closing point is dropped.
+      file: /home/shrinidi/sim_ws/src/pure_pursuit/waypoints/levine.csv
+      # RMS distance the reference spline may sit from the recorded points [m].
+      # The CSV was logged/hand-made at 0.1 m spacing, and interpolating it
+      # exactly (0.0) gives curvature spikes the car cannot follow. A few cm of
+      # smoothing removes them without moving the line noticeably.
+      smoothing: 0.02
+      # Spacing of the arc-length lookup tables [m]. Also the step of the
+      # coarse nearest-point search before Newton refinement.
+      ds: 0.05
+      # Windowed nearest-point search around the previous s: how far behind and
+      # ahead of it to look [m]. Must cover the distance the car can travel
+      # between two pose updates, with plenty of slack.
+      search_back: 1.0
+      search_fwd: 3.0
+      # If the car's |d| comes out larger than this, the windowed search is
+      # assumed to have locked onto the wrong place and is redone over the
+      # whole loop [m]. Larger than half the widest track section.
+      reset_dist: 1.0
+
+    map:
+      # Static occupancy map (ROS map_server yaml). This must be the CLEAN map
+      # with no test obstacles in it; it is used to tell static walls from
+      # obstacles. Same map the particle filter localizes on (map_1_clean).
+      yaml_file: /home/f1tenth/f1tenth_ws/src/frenet_planner/maps/map_1_clean.yaml
+      # Treat unknown cells (between free_thresh and occupied_thresh) as walls.
+      unknown_is_occupied: true
+
+    track:
+      # Spacing of the precomputed d_left(s), d_right(s) tables [m].
+      ds: 0.05
+      # Rays perpendicular to the raceline stop here even if no wall is hit [m].
+      # Must exceed the widest real half-track (Levine: ~0.8-1.0 m) but stay
+      # short of side hallways; at Levine's corners the outer ray otherwise runs
+      # 3 m down the adjoining corridor and the planner would treat it as track.
+      max_range: 1.2
+      # Each bound is replaced by its minimum over a window of this length
+      # centred on s [m]. Stops the planner from treating a doorway or a short
+      # gap in the wall as drivable track. 0 disables.
+      min_filter: 0.5
+
+    vehicle:
+      wheelbase: 0.3302       # [m] (lap_timer rules)
+      max_steer: 0.36         # [rad] matches rrt_node / pure_pursuit_node
+      width: 0.30             # [m]
+      length: 0.58            # [m] (f110_gym vehicle footprint)
+
+    collision:
+      # The car is modelled as this many equal circles along its length that
+      # together cover the length x width rectangle. 3 circles of a 0.58 x 0.30
+      # car have radius ~0.18 m, so they overhang the sides by ~3 cm.
+      n_circles: 3
+      # How far the centre of the car is ahead of the pose point [m]. 0 in
+      # f1tenth_gym (odom pose is the car's centre). On the car, if the pose
+      # is the rear axle, use about wheelbase / 2.
+      footprint_center_offset: 0.0
+      # A candidate collides if any circle comes closer than this to an
+      # obstacle box, i.e. boxes are inflated by this much [m].
+      obstacle_margin: 0.10
+
+    detection:
+      # Laser position ahead of the pose point along the car's heading [m].
+      # Sim: 0.275 (sim.yaml scan_distance_to_base_link, pose is base_link).
+      # Car: distance from the frame the localization pose refers to, to the laser.
+      laser_offset_x: 0.275
+      # Beams longer than this are ignored [m]. Also how far ahead obstacles
+      # can be seen, so keep it above the planner's longest horizon.
+      max_range: 6.0
+      # Points closer than this to an occupied cell of the static map are
+      # wall, not obstacle [m]. Must cover localization error; an obstacle
+      # pushed closer than this against a wall is only seen by its far side.
+      wall_margin: 0.15
+      # Points up to this far outside the track bounds still count. The
+      # bounds are conservative (min-filtered), so a small positive value
+      # keeps obstacles right against the bound [m].
+      track_bound_tolerance: 0.05
+      # Scan points are projected onto the raceline searching this far behind
+      # / ahead of the car's s [m]. fwd must cover max_range plus the extra
+      # arc length of curves.
+      frenet_window_back: 2.0
+      frenet_window_fwd: 9.0
+      # Adaptive breakpoint clustering: lambda is the shallowest surface
+      # angle to a beam still treated as one surface [rad] (0.17 = 10 deg),
+      # sigma the LiDAR range noise [m]. Larger lambda merges more.
+      breakpoint_lambda: 0.17
+      range_sigma: 0.01
+      # Two kept points with more than this many dropped beams between them
+      # (wall, off-track or invalid returns) are always different clusters.
+      # Small enough to separate objects, large enough to bridge a lost
+      # return or two on one object.
+      max_beam_gap: 2
+      # Clusters wider than this are dropped (walls, not obstacles); after
+      # merging, obstacles with fewer than min_cluster_points are dropped.
+      # max_cluster_size: the sim opponent is a full 0.58 x 0.31 car body, up
+      # to 0.66 m across when seen at an angle; the real opponent's 12 cm box
+      # is far smaller.
+      min_cluster_points: 2
+      max_cluster_size: 0.6
+      # Clusters this close in d and, after the min_s_extent extension
+      # below, in s are merged into one obstacle, unless what was seen of
+      # the result would exceed max_cluster_size [m]. An object seen
+      # at a grazing angle (a box's side face as we pass it) breaks into
+      # several clusters; without this each becomes its own track.
+      merge_gap: 0.10
+      # The LiDAR only sees an obstacle's near face. Boxes shorter than this
+      # in s are extended forward to this length [m] (~ the box or car).
+      min_s_extent: 0.3
+
+    tracking:
+      # Report an obstacle once it was detected in at least persist_n of the
+      # last persist_m scans.
+      persist_n: 3
+      persist_m: 5
+      # A detection further than this from a track's predicted position
+      # starts a new track [m].
+      assoc_gate: 0.6
+      # Kalman filter. Measurement noise of the box's rear edge s and centre
+      # d [m]; white-noise acceleration [m/s^2] (how hard an opponent can
+      # change speed); initial velocity uncertainty of a new track [m/s].
+      meas_std_s: 0.05
+      meas_std_d: 0.05
+      accel_std: 3.0
+      init_vel_std: 3.0
+      # Tracks slower than this along the track (|v_s|) are reported as
+      # static [m/s].
+      static_speed_threshold: 0.4
+      # A track detected at least coast_min_hits times (~0.25 s at 40 Hz)
+      # that stops being detected is kept, predicted forward, for coast_time
+      # [s] before it is dropped. Shorter-lived tracks just follow N-of-M,
+      # so brief phantoms do not linger.
+      coast_time: 0.5
+      coast_min_hits: 10
+
+    speed:
+      # Raceline speed profile, computed from the reference curvature because
+      # the raceline CSV has no speed column.
+      v_max: 6.0              # [m/s] straight-line cap before global_scale
+      a_lat_max: 4.0          # [m/s^2] v = sqrt(a_lat_max / |kappa|) in corners
+      a_accel_max: 3.0        # [m/s^2] forward pass of the profile
+      a_decel_max: 4.0        # [m/s^2] backward pass of the profile
+      # Every raceline speed is multiplied by this. Start low and raise it.
+      global_scale: 1.7
+
+    planner:
+      # Planning cycles per second [Hz].
+      rate: 25.0
+      # Spacing of the points along each candidate [m].
+      ds: 0.1
+      # Every candidate is checked over this much track ahead of the car,
+      # holding its end offset past its horizon [m]. Must exceed
+      # horizon_max and control.lookahead_max.
+      path_length: 5.0
+      # End offsets d_end, evenly spaced across the drivable band (plus 0
+      # and last cycle's d_end when they fit).
+      n_offsets: 11
+      # Horizons (track length to reach d_end) are speed x these times [s],
+      # clipped to [horizon_min, horizon_max] [m]. At 2 m/s: 1.5, 2.5, 4 m.
+      horizon_times: [0.75, 1.25, 2.0]
+      horizon_min: 1.0
+      horizon_max: 4.0
+      # Speed floor for horizon scaling and for timing moving obstacles [m/s].
+      v_plan_min: 1.0
+      # Candidates keep the car's side this far inside the track bounds [m].
+      bound_margin: 0.05
+      # The bounds are not checked on the first this-many metres of a
+      # candidate, where the car already is, so a car near a wall can
+      # still plan its way back in [m].
+      bounds_grace: 0.5
+      # Curvature limit is the steering limit (vehicle.kappa_max), or where
+      # the raceline itself is tighter, the raceline's curvature times
+      # (1 + this). Levine's raceline needs 1.39 1/m at one corner, above
+      # kappa_max = 1.14.
+      kappa_ref_slack: 0.1
+      # Obstacles count until their front edge is this far behind the car's
+      # pose [m]; past that, sampling stops and the car returns to the raceline.
+      obstacle_behind: 0.6
+      # If the car's d differs from last cycle's plan by more than this, d'
+      # and d'' restart from the measured heading instead of the plan [m].
+      state_reset_dist: 0.15
+      # Speed caps [m/s]: while avoiding; with no valid candidate (then also
+      # stopping stop_margin [m] short of the first collision on the raceline).
+      v_avoid: 1.5
+      v_fallback: 0.5
+      stop_margin: 0.3
+      weights:
+        offset: 1.0       # x mean |d| over the path [m]: stay near the raceline
+        jerk: 0.02        # x integral of (third derivative of d)^2 over the horizon [1/m^3]
+        curvature: 0.3    # x max |kappa| [1/m]
+        obstacle: 0.05    # x 1 / min clearance [1/m]: prefer a wider berth
+        switch: 1.0       # x |d_end - last d_end| [m]: hysteresis, no side flip-flop
+        length: 0.1       # x (longest sampled horizon - horizon) [m]: prefer long
+
+    behavior:
+      # A committed side (of a static obstacle or an overtaken opponent) is
+      # kept until the obstacle's front edge is this far behind the car's rear [m].
+      clear_dist: 0.5
+      # A moving obstacle counts as an opponent to trail or overtake when its
+      # rear edge is less than this ahead of the car's pose [m] (and its front
+      # is not yet clear_dist behind, so alongside counts).
+      opponent_range: 5.0
+      # TRAIL: hold this gap from our nose to its rear [m]: speed = opponent
+      # speed + trail_gain x (gap - trail_gap) [1/s], never above raceline
+      # speed; stop if it is ahead by less than trail_min_gap [m].
+      trail_gap: 1.5
+      trail_min_gap: 0.6
+      trail_gain: 1.0
+      # Except for that stop, trailing is never slower than this below the
+      # opponent [m/s]: an abandoned pass drops back, it does not brake
+      # hard beside the opponent.
+      drop_back_speed: 0.5
+      # OVERTAKE only if the raceline speed beats the opponent's by this
+      # much [m/s] and a path keeps overtake_margin from it (with the
+      # opponent moved along at its tracked speed) [m], ending at least
+      # pass_offset beside its centre [m]. Larger than the static margin:
+      # collisions are costly, so trail rather than force a pass.
+      overtake_min_advantage: 0.5
+      overtake_margin: 0.20
+      pass_offset: 0.45
+      # To start a pass, the lane beside the opponent must be free for this
+      # length (its rear edge onwards), taken as a parked box [m].
+      pass_length: 2.0
+      # planner.weights.obstacle while overtaking: beside the opponent the
+      # widest line matters more than staying near the raceline.
+      overtake_obstacle_weight: 1.0
+      # A pass under way continues while a path on its side keeps this
+      # clearance [m] (between obstacle_margin and overtake_margin, so a
+      # pass that just qualified does not flip on and off). After a pass is
+      # given up, no new attempt for this long [s].
+      overtake_keep_margin: 0.14
+      overtake_cooldown: 1.5
+
+    control:
+      # Pure pursuit on the planned path, as many times per second [Hz].
+      rate: 50.0
+      # Lookahead L = gain x speed + base, clipped to [min, max] [s, m, m, m].
+      lookahead_gain: 0.3
+      lookahead_base: 0.5
+      lookahead_min: 0.6
+      lookahead_max: 1.8
+
+    health:
+      # Localization health. If it fails for unhealthy_after scans in a row,
+      # the team's follow-the-gap drives until it passes for healthy_after.
+      # false: health is still measured and logged, the planner keeps driving.
+      # In tools/sim_eval.py locfail runs on Levine, the planner alone (which
+      # slows or stops when a bad pose turns walls into obstacles) survived
+      # more failures than follow-the-gap did; see the stage 4 report.
+      fallback_enabled: true
+      # Covariance from the pose message: 'pf3x3' = particle_filter's packing
+      # (x, y, yaw 3x3 in the first 9 entries), 'ros6x6' = standard
+      # Odometry layout. All-zero covariance (the sim) counts as healthy.
+      covariance_layout: pf3x3
+      max_position_std: 0.25       # sqrt(var_x + var_y) [m]
+      max_yaw_std: 0.15            # [rad]
+      # Scan-to-map mismatch: the fraction of scan points (within
+      # detection.max_range) farther than mismatch_dist from any wall of
+      # the static map. Real obstacles add a few percent; a pose error of a
+      # few tens of cm puts most of the scan off the walls.
+      mismatch_dist: 0.25          # [m]
+      max_mismatch_fraction: 0.4
+      min_scan_points: 100         # fewer valid points: no verdict, keep state
+      unhealthy_after: 4
+      healthy_after: 20
+      # Once healthy again, the planner takes back over only when the car
+      # is inside the track bounds and heading within this of the raceline
+      # direction [rad]; until then follow-the-gap keeps driving.
+      handback_max_heading: 0.5
+
+    gap_follow:
+      # Passed to the team's ReactiveFollowGap (values are its defaults).
+      range_max: 3.0               # [m]
+      bubble_radius: 0.23          # [m]
+      corner_safe_dist: 0.23       # [m]
+      fov_half_deg: 90.0           # [deg]
+
+    test_obstacles:
+      # Click RViz "Publish Point" on the map to add a box the planner
+      # avoids. The simulator does not see it, so it is safe to test with.
+      size: 0.30              # side length, square in (s, d) [m]
+      max_count: 3            # more clicks drop the oldest

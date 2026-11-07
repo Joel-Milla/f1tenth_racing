@@ -1,0 +1,157 @@
+GAP FOLLOW - EMERGENCY TUNING CHEAT SHEET
+File:  ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py   (parameter block at the top)
+Run:   source /opt/ros/humble/setup.bash && export ROS_DOMAIN_ID=2
+       python ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py
+       (Ctrl+C to stop. Edit file -> stop -> start again. No colcon build needed.)
+Restore best version:
+       cp ~/gap_follow_backups/gap_follow_params.CURRENT.py ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py
+
+Change ONE thing at a time, small steps.
+
+SPEED - MAIN KNOBS (best values, ~9.4 s lap on hard floor)
+  CORNER_SPEED        2.0   speed the car must be at when it reaches CORNER_BRAKE_POINT.
+                            Faster corners: 2.2   Running wide / hitting outer wall: 1.8
+  CORNER_BRAKE_POINT  1.5   wall distance [m] where it must be down to CORNER_SPEED.
+                            Brakes too early: 1.3   Arrives too fast at corners: 1.8-2.0
+  BRAKE_DECEL         2.5   how hard it plans to brake [m/s^2]. Higher = later braking, faster straights.
+                            Escapes track / overshoots corners: 2.0. On carpet try 2.8-3.0.
+  LATERAL_ACCEL       6.5   corner speed from steering. Slides wide in corners: 5.0. More grip (carpet): 7.0
+  MAX_SPEED           4.5   top speed cap [m/s] (VESC limit ~5.0 incl. gain). Rarely reached on short straights.
+  MIN_SPEED           1.5   never slower than this while driving. Too slow in tight turns: keep; hitting walls in tight turns: 1.2
+  MAX_ACCEL           4.0   how fast the speed target ramps up. 5-6 made it escape the track on hard floor.
+
+SPEED - VESC PUSH (leave unless needed)
+  SPEED_COMMAND_GAIN  1.10  multiplies every command (VESC runs ~10% slow). All-around slower: 1.0
+  BRAKE_BOOST         1.5   over-commands braking when too fast. Jerky braking: 1.0
+  ACCEL_BOOST         0.5   over-commands acceleration when too slow. Wheelspin / twitchy: 0.2
+
+STEERING / SAFETY (only if needed)
+  TARGET_DEEP_FRACTION 0.98 aim point. Wobbly / indecisive: 0.92. (Lower = later turn-in.)
+  MAX_STEERING_RATE    4.0  steering speed [rad/s]. Twitchy: 3.0
+  LOOKAHEAD_MAX        1.5  bigger = calmer on straights, turns later
+  DISPARITY_BUFFER     2.5  space kept from wall/obstacle edges. Clipping corners/obstacles: 3.0
+  SIDE_CLEARANCE       0.30 blocks turning into something beside the car. Clips obstacles: 0.35
+
+QUICK FIXES
+  Escapes track / hits wall after straight -> BRAKE_DECEL 2.0, or CORNER_BRAKE_POINT 1.8
+  Slides wide in corners                   -> CORNER_SPEED 1.8 and LATERAL_ACCEL 5.0
+  Everything too fast, need safe lap       -> SPEED_COMMAND_GAIN 1.0 and BRAKE_DECEL 2.0
+  Too slow, lots of margin                 -> CORNER_SPEED +0.2, then BRAKE_DECEL +0.3
+  Car stops ("There is no gap" in log)     -> it is too close to something; move it / DISPARITY_BUFFER 2.0
+
+MEASURED LIMITS (hard floor): grip ~3.3 m/s^2, real braking ~1.3 m/s^2 (VESC brake current limit).
+More speed needs carpet grip or more brake current in VESC Tool, not just bigger numbers here.
+
+Log line (4x per second): speed / steer / d_ahead (free distance) / odom (real speed) / side_block / calc time
+
+CARPET (race day) - grip test: understeer starts ~5.5-6 m/s^2, peak ~7 m/s^2 (hard floor 3.3)
+  Carpet version: CORNER_SPEED 2.5, LATERAL_ACCEL 7.5, BRAKE_DECEL 2.8 (saved: versions/gap_follow_params.carpet2.py)
+  If it slides/escapes on carpet, go back toward the floor values: CORNER_SPEED 2.0, LATERAL_ACCEL 6.5, BRAKE_DECEL 2.5
+  Node now falls back to VESC speed (sensors/core) if /odom stops publishing.
+  Faster carpet version: CORNER_SPEED 2.7, LATERAL_ACCEL 8.0, BRAKE_DECEL 2.8 (versions/gap_follow_params.carpet3.py)
+  Too much speed on carpet shows as running WIDE in corners (understeer), not spinning.
+  Safer carpet version: versions/gap_follow_params.carpet2.py (CORNER_SPEED 2.5, LATERAL_ACCEL 7.5)
+
+THE 3 VERSIONS (all in ~/gap_follow_backups, all with odom backup). To use one:
+  cp ~/gap_follow_backups/<NAME> ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py
+  SAFE_floor.py   CORNER_SPEED 2.0  LATERAL_ACCEL 6.5  BRAKE_DECEL 2.5   (hard floor, ~9.4 s lap tested)
+  SAFE_carpet.py  CORNER_SPEED 2.5  LATERAL_ACCEL 7.5  BRAKE_DECEL 2.8
+  FAST_carpet.py  CORNER_SPEED 2.7  LATERAL_ACCEL 8.0  BRAKE_DECEL 2.8   (race default)
+
+NARROW TRACK (race track ~1.1 m wide, 0.7 m at tightest): all 3 versions now use
+  DISPARITY_BUFFER 1.8, MAX_STEERING_RATE 3.0, LOOKAHEAD_MAX 1.8, SIDE_CLEARANCE 0.25.
+  Still wobbly -> MAX_STEERING_RATE 2.5, LOOKAHEAD_MAX 2.0.  Scraping walls -> DISPARITY_BUFFER 2.2.
+  SIDE_CHECK = False on all 3 versions: on the narrow track it blocked turns into the inner wall (car went straight into walls).
+  Turn it back on (True) only for a wide track with single obstacles to pass.
+  Scraping walls on carpet -> all 3 versions now DISPARITY_BUFFER 2.2, TARGET_DEEP_FRACTION 0.92 (more centred).
+  Still scraping -> DISPARITY_BUFFER 2.5 or lower CORNER_SPEED by 0.2.  Hesitates / stops in narrow part -> DISPARITY_BUFFER 2.0.
+
+DEADMAN (all 3 versions): HOLD R1 (button 5) to drive. Release = stop (sends 0 for 0.5 s, then quiet so L1 manual works).
+  Controller disconnected / silent > 0.3 s = stop.  Turn off: DEADMAN_ENABLED = False.  Wrong button: change DEADMAN_BUTTON.
+
+FAST2_carpet.py: CORNER_SPEED 2.9, LATERAL_ACCEL 8.5, BRAKE_DECEL 3.1, MAX_ACCEL 5.0 (~9.4 s lap, cleaner than FAST)
+  FAST + FAST2 wobbled at speed (1.3 Hz) -> calmer steering: LOOKAHEAD_MAX 2.2, STEERING_SMOOTHING 0.75, MAX_STEERING_RATE 2.5
+  Still wobbly -> LOOKAHEAD_MAX 2.5, STEERING_SMOOTHING 0.65.  Turns in too late now -> LOOKAHEAD_MAX 2.0.
+
+FAST3_carpet.py (most aggressive): FAST2 + CORNER_SPEED 3.1, TARGET_DEEP_FRACTION 0.98 (less wobble),
+  STEER_SPEED_DEADBAND 10 deg: steering < 10 deg = no slow-down in wavy bends (keeps speed if arc OR straight is clear).
+  Hits walls in the wavy part -> STEER_SPEED_DEADBAND math.radians(6) or 0 (off).  Back to FAST2: cp FAST2_carpet.py
+
+*** RACE VERSION: RACE_FAST3_good.py (= FAST3_carpet, best run: ~8.95 s lap, 2.67 m/s avg, 4.0 peak, calm steering) ***
+  cp ~/gap_follow_backups/RACE_FAST3_good.py ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py
+  Hold R1 to drive. Fallbacks: FAST2_carpet.py (safer, 9.4 s) -> SAFE_carpet.py -> SAFE_floor.py
+
+FAST4_carpet.py = FAST3 + in committed turns (>10 deg) only the driven arc is used for braking
+  (the wall straight ahead was slowing the car to ~1.6 m/s in the last right-hand curve). Replay: last curve 1.6-2.0 -> 2.7-3.0 m/s.
+  If it runs wide / hits the outer wall in the last curve -> go back: cp ~/gap_follow_backups/RACE_FAST3_good.py <live file>
+
+LAUNCH (FAST4-6 + live file): first press of R1 -> 5.0 m/s for 1.5 s counted from when the wheels actually move, then gap follow.
+  Once per node run. Skipped if something is < 1.0 m straight ahead. Off: LAUNCH_ENABLED = False. Longer: LAUNCH_TIME 1.5
+
+FAST5_carpet.py (riskiest): FAST4 + DISPARITY_BUFFER 1.6, BUBBLE_BUFFER 1.0, CORNER_SPEED 3.4, CORNER_BRAKE_POINT 1.2,
+  MIN_SPEED 2.0, BRAKE_BOOST 0.8, LATERAL_ACCEL 9.0. Slows only a little. Replay: steering a bit more active (smaller margins).
+  Wobbly -> DISPARITY_BUFFER 1.9.  Hits walls -> back to FAST4: cp ~/gap_follow_backups/FAST4_carpet.py <live file>
+
+FAST5 run: 8.65 s lap (best), avg 2.82 m/s, launch 3.4 m/s after 1 s, but lots of wall brushing.
+FAST6_carpet.py: FAST5 + CORNER_SPEED 3.6, LATERAL_ACCEL 9.5, BRAKE_DECEL 3.4, MIN_SPEED 2.2, ACCEL_BOOST 0.8
+FAST7_carpet.py (very aggressive): CORNER_SPEED 4.0, LATERAL_ACCEL 11.0, BRAKE_DECEL 4.0, MIN_SPEED 2.5, CORNER_BRAKE_POINT 1.0,
+  SPEED_COMMAND_GAIN 1.20, MAX_ACCEL 7.0. VESC command cap stays 5.0 m/s. If it crashes: back to FAST5 (8.65 s lap).
+
+LAST SESSION (shut down): live file = FAST6 with 1.5 s launch (saved as LAST_RUN_FAST6.py).
+  FAST6 live: avg 3.0 m/s while moving, peak 4.07, launch 3.8 m/s after 1.5 s, but lots of wall contact.
+  FAST7 crashed. Best measured lap: FAST5 8.65 s. Race backup without launch: RACE_FAST3_good.py.
+
+TRAILING (FAST6_trail.py = live, added for head-to-head; backup without it: PRE_TRAIL_backup_*.py / FAST6_carpet.py)
+  Moving car in our path -> hold TRAIL_GAP 0.8 m behind and match its speed. Stopped car (<0.5 m/s) -> NOT trailed, gap follow drives around (obstacle test unchanged).
+  Log shows "opp 1.20m@1.5 TRAIL". Off: TRAIL_ENABLED = False.  Too timid behind cars: TRAIL_GAP 0.6.  Bumps into cars: TRAIL_GAP 1.0.
+  Tested: 0 false trailing on 3 solo recordings; settles 0.80 m behind a 1.5 m/s or 0.8 m/s car in simulation.
+
+OVERTAKING (FAST6_pass.py = live; trail-only backup: FAST6_trail.py / PRE_PASS_backup_*.py)
+  Slower moving car in our path: if one side has >= PASS_MIN_WIDTH (0.5 m) free -> commit to that side for 1 s and pass at full speed.
+  No room on either side -> trail 0.8 m behind and pass as soon as the track widens. Stopped car -> go around (obstacle test unchanged).
+  Log shows "PASS-L" / "PASS-R" or "TRAIL". Too cautious (never passes): PASS_MIN_WIDTH 0.45. Squeezes too tight: 0.55.
+  Sim (2D ray-cast): passes in 5/6 cases (only fails with car dead centre in a 1.1 m track), no collisions. 0 false triggers on solo runs.
+  START: check the ~3 s startup delay on the stand (press R1, time until wheels turn) - it decides side-by-side starts.
+
+*** RACE STRATEGY: boost start, then play safe ***  RACE_SAFE_pass.py = LIVE
+  Launch 5.0 m/s for 1.5 s, then FAST4 speeds (CORNER_SPEED 3.1, DISPARITY_BUFFER 2.2, ~8.95 s laps) + pass/trail/follow.
+  Faster option with the same pass logic: FAST6_pass.py (FAST6 speeds, more wall contact).
+  Pass logic: room beside a slower car -> pass (keeps the lane while >= 0.35 m); no room -> FOLLOW straight behind (log "FOLLOW"),
+  never steers at a car closer than 0.9 m; a cancelled pass waits 1 s before retrying. Stopped car/box -> normal avoidance.
+  Sim: 0 collisions, 0 wall hits in 12 cases + obstacle + same-speed car; 0 false triggers on solo runs.
+
+*** V2 (after video review, 10/30): fixes weaving / zig-zag in curves ***  RACE_SAFE_v2.py = LIVE
+  Cause: wall bumps within +/-30 deg shortened the pure-pursuit lookahead -> twitchy steering at every wave.
+  Fix: LOOKAHEAD_PATH_ONLY = True (only things in the car's own path shorten the lookahead), TARGET_DEEP_FRACTION 0.93.
+  Real-map sim (track2_clean.pgm): laps 7.98-8.17 -> 7.75 s, steering reversals halved, clearance min 0.14 -> 0.18 m.
+  RACE_FAST_v2.py = same fix with FAST6 speeds: sim 7.2-7.4 s laps (sim has no tyre sliding: expect worse on the real car).
+  Rejected (made it worse in sim): aim-angle filter, centre-of-gap aiming. Back to before: PRE_V2_backup_*.py
+
+*** TRAIL-ONLY RACE SET (10/30) - all with today's weaving fix, NO passing ***   RACE_SAFE_today.py = LIVE
+  FAST6_today.py          FAST6 + weaving fix, no opponent logic (== LAST_RUN_FAST6_today.py, identical)
+  FAST6_trail_today.py    FAST6 speeds + weaving fix + trailing (PASS_ENABLED False)  (== RACE_FAST_today.py, identical)
+  RACE_SAFE_today.py      launch + FAST4 "play safe" speeds + weaving fix + trailing
+  Trailing window TRAIL_PATH_HALF_WIDTH 0.55: stays behind a car even if it is offset (does not squeeze alongside).
+  Sim: holds ~0.8 m behind a slower car, no collisions; obstacle box still avoided; 0.1% false triggers on solo laps.
+  To swap: cp ~/gap_follow_backups/<NAME> ~/f1tenth_ws/src/gap_follow/gap_follow/gap_follow_params.py
+  STRAIGHT LOCK (optional, not live): RACE_SAFE_today_lock.py / FAST6_trail_today_lock.py
+    Wheels held at 0 when gap follow wants < 4 deg AND a 0.6 m wide corridor is clear 3 m ahead (log shows "STRAIGHT").
+    Real-map sim: lap time change within noise (+-0.1 s), clearance min 0.18 -> 0.16 m. Sim does not model tyre scrub,
+    so only an on-track A/B test (same battery, 3+ laps each) can show a real gain. Off: STRAIGHT_LOCK_ENABLED = False.
+
+TODAY'S FULL SET (10/30) - every file has: weaving fix + 1.5 s launch boost + R1 deadman. No passing anywhere.
+                    normal                    with straight lock
+  FAST6 (no opp)    FAST6_today               FAST6_today_lock            (LAST_RUN_FAST6_today* = identical copies)
+  FAST6 + trailing  FAST6_trail_today         FAST6_trail_today_lock      (RACE_FAST_today* = identical copies)
+  SAFE  + trailing  RACE_SAFE_today = LIVE    RACE_SAFE_today_lock
+  TRAIL-ZONE FIX (10/30, applied to all trailing versions): side wall bumps were triggering false trailing (car braked on a clear straight).
+    Now an object offset > 0.35 m only counts if >= 0.8 m ahead and in front (|y| < 0.6 x). Version before the fix: RACE_SAFE_today_lock_LIKED.py
+  START FIX (10/30): RACE_SAFE_today_lock_front.py = LIVE. Launch was cancelled when the car started right next to the inner
+    wall (wall alongside counted as "obstacle 0.01 m ahead") and the car crawled at ~1 m/s for 2.5 s. Now the launch check
+    only looks inside the car's width (LAUNCH_CORRIDOR_HALF_WIDTH 0.18) and in front of the bumper (FRONT_MIN_X 0.15).
+    Replay of that start: launch fires, 4.45 m/s avg in first 2.5 s (was 1.97). A box 0.6 m ahead still cancels the launch.
+    Before this fix: PRE_FRONT_backup_*.py ; version you liked before the trail-zone fix: RACE_SAFE_today_lock_LIKED.py
+  BACK TO LIKED (10/30 ~14:00): trail-zone + start fixes felt worse on track -> live = RACE_SAFE_today_lock_LIKED.py
+  RACE_SAFE_zone_boost3.py = LIVE (10/30): LIKED + trail-zone fix + LAUNCH_TIME 3.0 with early hand-over
+    (launch ends when free path < braking distance + 0.5 m). Map sim: plain 3 s launch crashes at 2.3 s; with hand-over no crash,
+    launch lasts ~1.2 s from the usual start spot. No start fix (starting hugging the inner wall can still skip the launch).
